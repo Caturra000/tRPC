@@ -225,7 +225,7 @@ inline Client::~Client() {
 }
 
 inline void Client::init() {
-    _socket = ::socket(AF_INET, SOCK_STREAM, 0);
+    _socket = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if(_socket < 0) _errno = errno;
 }
 
