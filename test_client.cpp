@@ -13,22 +13,25 @@ int main() {
         } else {
             std::cout << "connected" << std::endl;
         }
+        auto start = std::chrono::steady_clock::now();
         auto client = std::move(pClient.value());
-        auto pResult = client.call<std::string>("append", "jojo", "dio");
-        if(pResult) {
-            std::cout << pResult.value() << std::endl;
-        } else {
-            std::cerr << "failed" << std::endl;
-            std::cerr << "reason:" << strerror(client.error()) << std::endl;
+        int sum = 0;
+        constexpr size_t count = 1e5;
+        for(size_t i = 0; i < count; ++i) {
+            auto resp = client.call<int>("add", sum, 1);
+            int old = sum;
+            if(old == (sum = resp.value_or(sum))) {
+                std::cerr << "failed at: " << i << std::endl;
+            }
         }
-        auto inval = client.call<int>("add", 1, 2, 3);
-        if(!inval) {
-            std::cerr << "inval failed" << std::endl;
-        } else {
-            std::cout << inval.value() << std::endl;
-        }
-        auto pResult2 = client.call<int>("add", 1, 2);
-        std::cout << pResult2.value_or(123) << std::endl;
+        auto end = std::chrono::steady_clock::now();
+        std::cout << "sum: " << sum << std::endl;
+        using Milli = std::chrono::duration<double, std::milli>;
+        std::cout << "per msg: " << Milli{end - start}.count() / count << "ms" << std::endl;
+        // output:
+        // connected
+        // sum: 100000
+        // per msg: 0.341057ms
     });
     co->resume();
     co::loop();
