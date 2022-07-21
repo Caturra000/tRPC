@@ -20,6 +20,10 @@ void makeRequestImpl(vsjson::Json &json, Arg &&arg, Args &&...args);
 template <typename ...Args>
 void makeRequestImpl(vsjson::Json &json, Args &&...args);
 
+/// response
+
+vsjson::Json makeEmptyResponse(vsjson::Json &request);
+
 /// result
 
 template <typename T>
@@ -49,6 +53,14 @@ inline void makeRequestImpl(vsjson::Json &json, Arg &&arg, Args &&...args) {
 template <typename ...Args>
 inline void makeRequestImpl(vsjson::Json &json, Args &&...args) {}
 
+inline vsjson::Json makeEmptyResponse(vsjson::Json &request) {
+    vsjson::Json response =
+    {
+        {detail::protocol::Field::jsonrpc, detail::protocol::Attribute::version},
+        {detail::protocol::Field::id, request[detail::protocol::Field::id].to<int>()},
+    };
+    return response;
+}
 
 template <typename T>
 inline std::optional<T> makeResult(vsjson::Json &response) {

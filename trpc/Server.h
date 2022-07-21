@@ -18,6 +18,10 @@ namespace trpc {
 class Server {
 public:
 
+    using ProtocolType = detail::Codec::ProtocolType;
+
+public:
+
     // resume in coroutine
     void start();
 
@@ -33,12 +37,12 @@ public:
     void setTimeout(std::chrono::milliseconds timeout);
     void setPending(std::chrono::milliseconds timeout);
 
-    // require: bool(vsjson::Json &)
-    // TODO: abstract context, not json
+    // require: bool(ProtocolType &)
+    // TODO: abstract context, not ProtocolType
     template <typename Func>
     void onRequest(Func &&requestCallback);
 
-    // require: bool(vsjson::Json &)
+    // require: bool(ProtocolType &)
     template <typename Func>
     void onResponse(Func &&responseCallback);
 
@@ -58,7 +62,7 @@ public:
 
 private:
 
-    vsjson::Json netCall(const std::string &method, vsjson::Json args);
+    ProtocolType netCall(const std::string &method, ProtocolType args);
 
     void onAccept(int peerFd, Endpoint peerEndpoint);
 
@@ -95,7 +99,7 @@ private:
     Endpoint _endpoint;
 
     // bound function
-    using Proxy = std::function<vsjson::Json(vsjson::Json)>;
+    using Proxy = std::function<ProtocolType(ProtocolType)>;
     std::unordered_map<std::string, Proxy> _table;
 
     // system call errno or application layer error
@@ -109,8 +113,8 @@ private:
 
     detail::Codec _codec;
 
-    std::function<bool(vsjson::Json &)> _requestCallback;
-    std::function<bool(vsjson::Json &)> _responseCallback;
+    std::function<bool(ProtocolType &)> _requestCallback;
+    std::function<bool(ProtocolType &)> _responseCallback;
 };
 
 inline void Server::start() {
@@ -224,7 +228,7 @@ inline std::optional<Server> Server::make(Endpoint endpoint) {
     return server;
 }
 
-inline vsjson::Json Server::netCall(const std::string &method, vsjson::Json args) {
+inline Server::ProtocolType Server::netCall(const std::string &method, ProtocolType args) {
     auto methodHandle = _table.find(method);
     if(methodHandle != _table.end()) {
         auto &proxy = methodHandle->second;
@@ -270,24 +274,20 @@ inline void Server::onAccept(int peerFd, Endpoint peerEndpoint) {
             continue;
         }
 
-        // TODO codec
-        auto id = request[detail::protocol::Field::id].to<int>();
-        auto &args = request[detail::protocol::Field::params];
-        auto method = std::move(request[detail::protocol::Field::method]).to<std::string>();
-        vsjson::Json response =
-        {
-            {detail::protocol::Field::jsonrpc, detail::protocol::Attribute::version},
-            {detail::protocol::Field::id, id},
-        };
+        auto response = detail::makeEmptyResponse(request);
+
+        // TODO lvalue
+        auto [method, args] = _codec.prepareNetCall(std::move(request));
 
         // try-catch can capture all the exceptions without modifying CallProxy function signatures
         //     and remote exceptions in any bound function can be rethrown to RPC client
         // TODO auto [result, err, errorLayer] = netCall(...)
         try {
-            response[detail::protocol::Field::result] = netCall(method, std::move(args));
+            auto result = netCall(method, std::move(args));
+            _codec.fillResultToResponse(response, std::move(result));
         } catch(const detail::protocol::Exception &e) {
             _codec.reportError(response, e);
-        } catch(const vsjson::JsonException &e) {
+        } catch(const detail::Codec::InstanceException &e) {
             _codec.reportError(response, detail::protocol::Exception::makeParseErrorException());
         } catch(const std::exception &e) {
             _codec.reportError(response, detail::protocol::Exception::makeInternalErrorException());
