@@ -57,13 +57,21 @@ inline ssize_t bestEffortTemplate(CoPosixFunc func, int event, int fd, const voi
 
         ssize_t ret = func(fd, (char*)(buf) + offset, size - offset);
 
-        // interrupted
-        if(ret < 0 && errno == EINTR) {
-            continue;
-        }
-        // error
-        if(ret < 0) {
-            return -1;
+        if(ret < 0) switch(errno) {
+            // interrupted
+            case EINTR:
+                continue;
+
+            // temporarily unavailable
+            // https://github.com/apache/incubator-brpc/blob/master/docs/cn/error_code.md
+            case EAGAIN:
+                // FIXME: not a good idea, but it is a rare case
+                co::usleep(1);
+                continue;
+
+            // error
+            default:
+                return -1;
         }
         // FIN
         if(ret == 0) {

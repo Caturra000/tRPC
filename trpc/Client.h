@@ -110,13 +110,13 @@ private:
 template <typename T, typename ...Args>
 inline std::optional<T> Client::call(const std::string &function, Args &&...arguments) {
 
+    using Header = detail::Codec::Header;
+
     auto token = _tokens.acquire();
     auto request = detail::makeRequest(token, function, std::forward<Args>(arguments)...);
 
-    std::string dump = request.dump();
+    auto [dump, length, beLength] = _codec.dump(request);
 
-    uint32_t length = dump.length();
-    uint32_t beLength = ::htonl(length);
     if(!bestEffortWrite(&beLength, sizeof beLength)) {
         return std::nullopt;
     }
@@ -126,38 +126,21 @@ inline std::optional<T> Client::call(const std::string &function, Args &&...argu
     // TODO buffer allocate policy: BufferAllocator
     char buf[BUF_SIZE_ON_STACK];
 
-    char *cur = buf;
-    auto tick = [] { return std::chrono::steady_clock::now(); };
-    bool verified = false;
-    {
-        // TODO codec
-        auto start = tick();
-        while(cur < std::end(buf) && tick() - start < _timeout) {
-            int ret = co::read(_socket, cur, std::end(buf) - cur);
-            if(ret < 0) {
-                if(errno == EINTR) {
-                    continue;
-                } else {
-                    _errno = errno;
-                    break;
-                }
-            }
-            if(ret == 0) {
-                break;
-            }
-            cur += ret;
-            if(_codec.verify(buf, cur - buf)) {
-                verified = true;
-                break;
-            }
-        }
+    if(!bestEffortRead(buf, sizeof(Header))) {
+        return std::nullopt;
     }
-    if(!verified) {
+
+    auto [fastVerify, contentLength] = _codec.contentLength(buf, sizeof(Header));
+
+    if(!fastVerify || !bestEffortRead(buf + sizeof(Header), contentLength)) {
+        return std::nullopt;
+    }
+    if(!_codec.verify(buf, sizeof(Header) + contentLength)) {
         _errno = EINVAL;
         return std::nullopt;
     }
 
-    auto response = _codec.decode(buf, cur - buf);
+    auto response = _codec.decode(buf, sizeof(Header) + contentLength);
     return detail::makeResult<T>(response);
 
     // we will not capture exceptions
