@@ -154,7 +154,7 @@ inline std::optional<T> Client::call(const std::string &function, Args &&...argu
     //
     // read response header
     if(auto [success, some] = bestEffortRead(buf, sizeof(Header)); !success) {
-        _health.set(some, detail::Health::HEADER_READ_SOME, 0 /*unused*/);
+        _health.set(std::max<ssize_t>(0, some), detail::Health::HEADER_READ_SOME, 0 /*unused*/);
         return std::nullopt;
     }
 

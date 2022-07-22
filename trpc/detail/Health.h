@@ -14,7 +14,7 @@ public:
         // initial state
         // no byte to read and abort
         NO_READ,
-        // `some` is greater than 0
+        // `some` is greater than or equal to 0
         // header is unknown
         HEADER_READ_SOME,
         // `some` may be 0 byte
