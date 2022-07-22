@@ -10,6 +10,7 @@
 #include "detail/resolve.h"
 #include "detail/TokenGenerator.h"
 #include "detail/bestEffort.h"
+#include "detail/Health.h"
 #include "Endpoint.h"
 namespace trpc {
 
@@ -32,6 +33,8 @@ public:
     // last errno
     int error();
 
+    int fd() const;
+
 // connection
 public:
 
@@ -45,8 +48,8 @@ public:
 
 private:
 
-    bool bestEffortRead(const void *buf, size_t size, size_t maxRetries = 10);
-    bool bestEffortWrite(const void *buf, size_t size, size_t maxRetries = 10);
+    std::tuple<bool, ssize_t> bestEffortRead(const void *buf, size_t size, size_t maxRetries = 10);
+    std::tuple<bool, ssize_t> bestEffortWrite(const void *buf, size_t size, size_t maxRetries = 10);
 
 // class attributes
 public:
@@ -105,6 +108,9 @@ private:
     detail::TokenGenerator _tokens;
 
     detail::Codec _codec;
+
+    // health (or consistency?) check
+    detail::Health _health;
 };
 
 template <typename T, typename ...Args>
@@ -112,29 +118,68 @@ inline std::optional<T> Client::call(const std::string &function, Args &&...argu
 
     using Header = detail::Codec::Header;
 
+    if(!_health.check(_socket)) {
+        return std::nullopt;
+    }
+
     auto token = _tokens.acquire();
     auto request = detail::makeRequest(token, function, std::forward<Args>(arguments)...);
 
     auto [dump, length, beLength] = _codec.dump(request);
 
-    if(!bestEffortWrite(&beLength, sizeof beLength)) {
+    // sacrificing availability for consistency
+    //
+    // if write (request) failed
+    // client/connection will not maintain consistency
+    // close directly
+    //
+    // write request header
+    if(auto [success, written] = bestEffortWrite(&beLength, sizeof beLength); !success) {
+        if(written > 0) close();
         return std::nullopt;
     }
-    if(!bestEffortWrite(dump.c_str(), length)) {
+
+    // write request content
+    if(auto [success, _] = bestEffortWrite(dump.c_str(), length); !success) {
+        // prefix bytes has written
+        close();
         return std::nullopt;
     }
+
     // TODO buffer allocate policy: BufferAllocator
     char buf[BUF_SIZE_ON_STACK];
 
-    if(!bestEffortRead(buf, sizeof(Header))) {
+    // if read (response) failed
+    // this connection is still alive
+    //
+    // read response header
+    if(auto [success, some] = bestEffortRead(buf, sizeof(Header)); !success) {
+        _health.set(some, detail::Health::HEADER_READ_SOME, 0 /*unused*/);
         return std::nullopt;
     }
 
-    auto [fastVerify, contentLength] = _codec.contentLength(buf, sizeof(Header));
+    auto [/*fastVerify*/ _, contentLength] = _codec.contentLength(buf, sizeof(Header));
 
-    if(!fastVerify || !bestEffortRead(buf + sizeof(Header), contentLength)) {
+    // what happened?
+    // if(!fastVerify) {
+    //     close();
+    //     return std::nullopt;
+    // }
+
+    // out of stack
+    // resize is easy, but I don't want to do
+    if(sizeof(Header) + contentLength > sizeof buf) {
+        _errno = ENOMEM;
+        close();
         return std::nullopt;
     }
+
+    // read response content
+    if(auto [success, some] = bestEffortRead(buf + sizeof(Header), contentLength); !success) {
+        _health.set(std::max<ssize_t>(0, some), detail::Health::CONTENT_READ_SOME, contentLength);
+        return std::nullopt;
+    }
+
     if(!_codec.verify(buf, sizeof(Header) + contentLength)) {
         _errno = EINVAL;
         return std::nullopt;
@@ -155,6 +200,10 @@ inline int Client::error() {
     int ret = _errno;
     _errno = 0;
     return ret;
+}
+
+inline int Client::fd() const {
+    return _socket;
 }
 
 inline bool Client::connect(Endpoint endpoint) {
@@ -197,7 +246,8 @@ inline std::optional<Client> Client::make(Endpoint endpoint) {
 inline Client::Client(Client &&rhs)
     : _socket(rhs._socket),
       _timeout(rhs._timeout),
-      _errno(rhs._errno)
+      _errno(rhs._errno),
+      _health(rhs._health)
 {
     rhs._socket = SOCKET_INVALID;
 }
@@ -219,26 +269,28 @@ inline void Client::close() {
     }
 }
 
-inline bool Client::bestEffortRead(const void *buf, size_t size, size_t maxRetries) {
-    if(detail::bestEffortRead(_socket, buf, size, _timeout, maxRetries) == size) {
-        return true;
+inline std::tuple<bool, ssize_t> Client::bestEffortRead(const void *buf, size_t size, size_t maxRetries) {
+    ssize_t ret = detail::bestEffortRead(_socket, buf, size, _timeout, maxRetries);
+    if(ret == size) {
+        return {true, size};
     }
     if(!(_errno = errno)) {
-        // if read m bytes but n > m
+        // if read m bytes but n > m (active but too slow)
         // it is also ETIMEDOUT
         _errno = ETIMEDOUT;
     }
-    return false;
+    return {false, ret};
 }
 
-inline bool Client::bestEffortWrite(const void *buf, size_t size, size_t maxRetries) {
-    if(detail::bestEffortWrite(_socket, buf, size, _timeout, maxRetries) == size) {
-        return true;
+inline std::tuple<bool, ssize_t> Client::bestEffortWrite(const void *buf, size_t size, size_t maxRetries) {
+    ssize_t ret = detail::bestEffortWrite(_socket, buf, size, _timeout, maxRetries);
+    if(ret == size) {
+        return {true, size};
     }
     if(!(_errno = errno)) {
         _errno = ETIMEDOUT;
     }
-    return false;
+    return {false, ret};
 }
 
 } // trcp
