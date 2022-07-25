@@ -1,17 +1,18 @@
 #include <bits/stdc++.h>
 #include "trpc/Client.h"
 
+using namespace std::chrono;
+
 std::atomic<int> gTODO {};
-std::atomic<std::chrono::system_clock::time_point> gStart {std::chrono::system_clock::now()};
-std::atomic<std::chrono::system_clock::time_point> gEnd {std::chrono::system_clock::now()};
+std::atomic<system_clock::time_point> gStart {system_clock::now()};
+std::atomic<system_clock::time_point> gEnd {system_clock::now()};
 
 void clientRoutine(int sessions, int startNumber, int numbers) {
-::signal(SIGPIPE, SIG_IGN);
+    ::signal(SIGPIPE, SIG_IGN);
     auto &env = co::open();
     int sum = startNumber;
-    int count = 5e5;
     int done = 0;
-    auto start = std::chrono::steady_clock::now();
+    int sNumbers = numbers / sessions;
     for(int i = 0; i < sessions; ++i) {
         auto co = env.createCoroutine([&] {
             trpc::Endpoint peer {"127.0.0.1", 2333};
@@ -19,11 +20,9 @@ void clientRoutine(int sessions, int startNumber, int numbers) {
             if(!pClient) {
                 std::cerr << "failed, abort" << std::endl;
                 return;
-            } else {
-                std::cout << "connected" << std::endl;
             }
             auto client = std::move(pClient.value());
-            for(size_t j = 0; j < numbers; ++j) {
+            for(size_t j = 0; j < sNumbers; ++j) {
                 int old = sum;
                 // add first, other clients won't send the same request
                 sum++;
@@ -36,14 +35,14 @@ void clientRoutine(int sessions, int startNumber, int numbers) {
             done++;
             if(done == sessions) {
                 if(--gTODO == 0) {
-                    gEnd = std::chrono::system_clock::now();
+                    gEnd = system_clock::now();
                     std::cout << "done, press any key" << std::endl;
                 }
             }
         });
         co->resume();
     }
-    
+
     co::loop();
 }
 
@@ -61,27 +60,31 @@ int main(int argc, const char *argv[]) {
     }
 
     // total
-    int count = 1e5;
+    int count = 1 << 16;
     if(argc > 3) {
         count = ::atoi(argv[3]);
     }
-    gStart = std::chrono::system_clock::now();
+
+    std::cout << "start test: " << '{'
+        << "threads: " << threads << ", "
+        << "per thread sessions: " << sessions << ", "
+        << "total sessions: " << threads * sessions << ", "
+        << "count: " << count << '}' << std::endl;
+
+    gStart = system_clock::now();
 
     for(int i = 0; i < threads; ++i) {
         std::thread {clientRoutine, sessions, i * count, count / threads}.detach();
     }
 
+    // hang
     int c; std::cin>>c;
 
-    using Milli = std::chrono::duration<double, std::milli>;
-    auto perMsg = Milli{gEnd.load() - gStart.load()}.count() / count / threads;
+    using Milli = duration<double, std::milli>;
+    auto perMsg = Milli{gEnd.load() - gStart.load()}.count() / count;
     auto qps = 1000 / perMsg;
     std::cout << "per msg: " << perMsg << "ms" << std::endl;
     std::cout << "QPS: " << qps << std::endl;
-    // 4750U
-    // server: 10
-    // client: 8 2 100000
-    // per msg: 0.00633958ms
-    // QPS: 157739
+
     return 0;
 }
