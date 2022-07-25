@@ -185,6 +185,18 @@ TODO 先看`test`文件吧
 
 有得又有失吧
 
+## 性能测试
+
+据**相当不严谨**的性能测试，server端开启16线程，在我的笔记本（实际物理CPU为8核）上能达到约10万QPS
+
+其中客户端从8线程增长到32线程，协程总数从8增长到2048，单次 request / response 的封装开销约64字节
+
+对比[brpc](https://brpc.apache.org/zh/docs/benchmark/)提供的数据
+
+性能表现高于grpc应该没问题，但是离brpc的25万QPS仍有距离（然而别人有更好的测试机器，且最小的物理线程都有24线程）
+
+TODO 完全相同的测试方式，且需要同一设备
+
 ## TODO
 
 virtual network
