@@ -39,6 +39,10 @@ private:
     // error case will fall back to UNDEFINED
     void stateMachine(int fd, char *buf, size_t boundary, State nextState);
 
+public:
+
+    constexpr static size_t BUF_SIZE = 1 << 12;
+
 private:
 
     ssize_t _some {};
@@ -59,7 +63,7 @@ inline bool Health::check(int fd) {
         return true;
     }
 
-    char buf[0xffff];
+    char buf[BUF_SIZE];
 
     // TODO reduce overhead of system call
 
