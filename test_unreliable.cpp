@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <random>
 #include <memory>
@@ -11,15 +12,11 @@ struct Mock {
     milliseconds rttMin;
     milliseconds rttMax; // >= rttMin
     size_t lostRate; // [0, 100]
-    size_t killRate; // [0, 100], I will kill my self!
+    size_t crashRate; // [0, 100], I will kill my self!
     size_t packetLimit; // [0, packetLimit) bytes
 };
 
 trpc::Endpoint local {"127.0.0.1", 2334};
-
-bool closedSocket(int fd) {
-    return fd < 0;
-}
 
 int main(int argc, const char *argv[]) {
     ::signal(SIGPIPE, SIG_IGN);
@@ -35,7 +32,7 @@ int main(int argc, const char *argv[]) {
         .rttMin = 100ms,
         .rttMax = 300ms,
         .lostRate = 40,
-        .killRate = 5,
+        .crashRate = 5,
         // TODO
         .packetLimit = std::numeric_limits<size_t>::max()
     };
@@ -51,7 +48,7 @@ int main(int argc, const char *argv[]) {
     std::uniform_int_distribution<> distLost(0, 100);
     auto randRTT = [&] { return distRTT(randomEngine); };
     auto randLost = [&] { return distLost(randomEngine); };
-    auto randKill = randLost;
+    auto randCrash = randLost;
 
 
     /// create server
@@ -75,7 +72,7 @@ int main(int argc, const char *argv[]) {
 
 
     server.onRequest([&](auto &&) {
-        if(randKill() < mock.killRate) {
+        if(randCrash() < mock.crashRate) {
             server.close();
             return false;
         }
@@ -96,6 +93,7 @@ int main(int argc, const char *argv[]) {
 
 
     /// client routine
+
 
     constexpr int sNumbers = numbers / sessions;
 
@@ -137,7 +135,9 @@ int main(int argc, const char *argv[]) {
             for(size_t j = 0; j < sNumbers; ++j) {
                 int old = sum++;
 
+
                 /// call
+
 
                 auto respStart = steady_clock::now();
                 auto resp = client.call<int>("add", old, 1);
