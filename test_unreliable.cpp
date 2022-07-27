@@ -11,6 +11,7 @@ struct Mock {
     milliseconds rttMin;
     milliseconds rttMax; // >= rttMin
     size_t lostRate; // [0, 100]
+    size_t killRate; // [0, 100], I will kill my self!
     size_t packetLimit; // [0, packetLimit) bytes
 };
 
@@ -34,6 +35,7 @@ int main(int argc, const char *argv[]) {
         .rttMin = 100ms,
         .rttMax = 300ms,
         .lostRate = 40,
+        .killRate = 5,
         // TODO
         .packetLimit = std::numeric_limits<size_t>::max()
     };
@@ -49,6 +51,7 @@ int main(int argc, const char *argv[]) {
     std::uniform_int_distribution<> distLost(0, 100);
     auto randRTT = [&] { return distRTT(randomEngine); };
     auto randLost = [&] { return distLost(randomEngine); };
+    auto randKill = randLost;
 
 
     /// create server
@@ -72,6 +75,10 @@ int main(int argc, const char *argv[]) {
 
 
     server.onRequest([&](auto &&) {
+        if(randKill() < mock.killRate) {
+            server.close();
+            return false;
+        }
         if(milliseconds delay {randRTT()}; delay != 0ms) {
             co::poll(nullptr, 0, delay.count());
         }
@@ -90,7 +97,7 @@ int main(int argc, const char *argv[]) {
 
     /// client routine
 
-    const int sNumbers = numbers / sessions;
+    constexpr int sNumbers = numbers / sessions;
 
     int sum = 0;
     int done = 0;
@@ -147,9 +154,9 @@ int main(int argc, const char *argv[]) {
                     firstTest = false;
                     minLatency = maxLatency = Milli{respEnd - respStart};
                 // closed client or inconsistent connection will return `call()` quickly
-                } else if(Milli{respEnd - respStart} > 0.1ms){
-                    minLatency = std::min(minLatency, Milli{respEnd - respStart});
-                    maxLatency = std::max(maxLatency, Milli{respEnd - respStart});
+                } else if(Milli latency {respEnd - respStart}; latency > 0.1ms){
+                    minLatency = std::min(minLatency, latency);
+                    maxLatency = std::max(maxLatency, latency);
                 }
             }
 
