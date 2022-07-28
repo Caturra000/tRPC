@@ -8,9 +8,12 @@
 using namespace std::chrono;
 using namespace std::chrono_literals;
 
+// floating point milliseconds
+using Milli = duration<double, std::milli>;
+
 struct Mock {
-    milliseconds rttMin;
-    milliseconds rttMax; // >= rttMin
+    Milli rttMin;
+    Milli rttMax; // >= rttMin
     size_t lostRate; // [0, 100]
     size_t crashRate; // [0, 100], I will kill my self!
     size_t packetLimit; // [0, packetLimit) bytes
@@ -21,7 +24,6 @@ trpc::Endpoint local {"127.0.0.1", 2334};
 int main(int argc, const char *argv[]) {
     ::signal(SIGPIPE, SIG_IGN);
     auto &env = co::open();
-    using Milli = duration<double, std::milli>;
 
 
     /// configurations
@@ -38,9 +40,11 @@ int main(int argc, const char *argv[]) {
     };
 
     // client config
-    constexpr int sessions = 100;
-    constexpr int numbers = sessions * 2;
-    constexpr auto timeout = 150ms;
+    constexpr struct {
+        int sessions = 100;
+        int numbers = sessions * 2;
+        Milli timeout = 150ms;
+    } config;
 
     std::random_device randomDevice;
     std::mt19937 randomEngine(randomDevice());
@@ -76,7 +80,7 @@ int main(int argc, const char *argv[]) {
             server.close();
             return false;
         }
-        if(milliseconds delay {randRTT()}; delay != 0ms) {
+        if(Milli delay {randRTT()}; delay != 0ms) {
             co::poll(nullptr, 0, delay.count());
         }
         bool lost = randLost() < mock.lostRate;
@@ -95,7 +99,7 @@ int main(int argc, const char *argv[]) {
     /// client routine
 
 
-    constexpr int sNumbers = numbers / sessions;
+    constexpr int sNumbers = config.numbers / config.sessions;
 
     int sum = 0;
     int done = 0;
@@ -110,7 +114,7 @@ int main(int argc, const char *argv[]) {
     auto report = [&] {
         auto end = steady_clock::now();
         auto elapsed = Milli{end - start}.count();
-        auto amortized = elapsed / numbers;
+        auto amortized = elapsed / config.numbers;
         std::cout << "======================" << std::endl;
         std::cout << "elapsed: " << elapsed << "ms" << std::endl;
         std::cout << "amortized: " << amortized << "ms" << std::endl;
@@ -123,7 +127,7 @@ int main(int argc, const char *argv[]) {
     };
 
 
-    for(int i = 0; i < sessions; ++i) {
+    for(int i = 0; i < config.sessions; ++i) {
         auto co = env.createCoroutine([&, i] {
             auto pClient = trpc::Client::make(local);
             if(!pClient) {
@@ -131,6 +135,7 @@ int main(int argc, const char *argv[]) {
                 return;
             }
             auto client = std::move(pClient.value());
+            auto timeout = duration_cast<milliseconds>(config.timeout);
             client.setTimeout(timeout);
             for(size_t j = 0; j < sNumbers; ++j) {
                 int old = sum++;
@@ -160,7 +165,7 @@ int main(int argc, const char *argv[]) {
                 }
             }
 
-            if(++done == sessions) {
+            if(++done == config.sessions) {
                 report();
             }
         });
