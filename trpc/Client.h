@@ -2,6 +2,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <algorithm>
 #include <optional>
 #include <chrono>
 #include <string>
@@ -64,12 +65,14 @@ public:
     Client(const Client&) = delete;
     Client(Client&&);
 
+    Client& operator=(Client);
+
     ~Client();
 
     // two phase construction
     void init();
 
-    // void swap(Client &rhs);
+    void swap(Client&);
 
     // factory method: makes ready client
     static std::optional<Client> make();
@@ -252,6 +255,10 @@ inline Client::Client(Client &&rhs)
     rhs._socket = SOCKET_INVALID;
 }
 
+inline Client& Client::operator=(Client that) {
+    that.swap(*this);
+    return *this;
+}
 
 inline Client::~Client() {
     this->close();
@@ -260,6 +267,16 @@ inline Client::~Client() {
 inline void Client::init() {
     _socket = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if(_socket < 0) _errno = errno;
+}
+
+inline void Client::swap(Client &that) {
+    using std::swap;
+    swap(this->_socket, that._socket);
+    swap(this->_timeout, that._timeout);
+    swap(this->_errno, that._errno);
+    swap(this->_tokens, that._tokens);
+    swap(this->_codec, that._codec);
+    swap(this->_health, that._health);
 }
 
 inline void Client::close() {

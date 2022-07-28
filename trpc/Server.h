@@ -2,6 +2,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <algorithm>
 #include <optional>
 #include <chrono>
 #include <cstddef>
@@ -50,12 +51,18 @@ public:
 
     // see Client::Client()
     explicit Server(Endpoint);
+
     Server(const Server&) = delete;
     Server(Server&&);
+
+    Server& operator=(Server);
+
     ~Server();
 
     // two phase construction
     void init();
+
+    void swap(Server&);
 
     // factory method: makes listened server
     static std::optional<Server> make(Endpoint);
@@ -194,6 +201,11 @@ inline Server::Server(Server &&rhs)
     rhs._fd = SOCKET_INVALID;
 }
 
+inline Server& Server::operator=(Server that) {
+    that.swap(*this);
+    return *this;
+}
+
 inline Server::~Server() {
     this->close();
 }
@@ -219,6 +231,19 @@ inline void Server::init() {
         _errno = errno;
         return;
     }
+}
+
+inline void Server::swap(Server &that) {
+    using std::swap;
+    swap(this->_fd, that._fd);
+    swap(this->_endpoint, that._endpoint);
+    swap(this->_table, that._table);
+    swap(this->_errno, that._errno);
+    swap(this->_timeout, that._timeout);
+    swap(this->_pending, that._pending);
+    swap(this->_codec, that._codec);
+    swap(this->_requestCallback, that._requestCallback);
+    swap(this->_responseCallback, that._responseCallback);
 }
 
 inline std::optional<Server> Server::make(Endpoint endpoint) {
